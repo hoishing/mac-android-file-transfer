@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "mac-android-file-transfer"
-version = "0.1.3"
+version = "0.2.1"
 source = { editable = "." }
 
 [package.dev-dependencies]

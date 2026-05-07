@@ -46,7 +46,7 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.1.3\n"
+    assert result.stdout == "maft 0.2.1\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
@@ -160,6 +160,28 @@ def test_completion_install_writes_zsh_completion(tmp_path: Path) -> None:
     assert "'--mount[mounted Android folder]:mountpoint:_files -/'" in content
     assert "'--force[overwrite an existing completion file]'" in content
     assert f"installed zsh completion to {target}" in result.stdout
+
+
+def test_zsh_completion_default_directory_uses_site_functions(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = PYTHONPATH
+    env["ZDOTDIR"] = str(tmp_path / "zdotdir")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from maft.cli import default_completion_dir; print(default_completion_dir('zsh'))",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "/usr/local/share/zsh/site-functions\n"
 
 
 def test_completion_install_refuses_existing_file_without_force(tmp_path: Path) -> None:
