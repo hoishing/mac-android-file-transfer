@@ -1,6 +1,6 @@
 [project]
 name = "mac-android-file-transfer"
-version = "0.1.0"
+version = "0.1.1"
 description = "macOS CLI wrapper around go-mtpfs for Android file transfer"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,3 +27,10 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 include = ["src", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.3",
+    "pytest>=9.0.3",
+    "ruff>=0.15.12",
+]

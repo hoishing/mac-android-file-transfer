@@ -16,6 +16,7 @@ def run_maft(
     tmp_path: Path,
     *args: str,
     path: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = PYTHONPATH
@@ -23,6 +24,8 @@ def run_maft(
     env["MAFT_MACFUSE_PATHS"] = str(tmp_path / "macfuse.fs")
     if path is not None:
         env["PATH"] = path
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-m", "maft.cli", *args],
         cwd=ROOT,
@@ -42,15 +45,37 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.1.0\n"
+    assert result.stdout == "maft 0.1.1\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
-    result = run_maft(tmp_path, "doctor", path="/usr/bin:/bin")
+    result = run_maft(
+        tmp_path,
+        "doctor",
+        path="/usr/bin:/bin",
+        extra_env={"GOPATH": str(tmp_path / "missing-go"), "HOME": str(tmp_path / "home")},
+    )
 
     assert result.returncode == 1
     assert "go-mtpfs: missing" in result.stdout
     assert "macFUSE: missing" in result.stdout
+
+
+def test_doctor_finds_go_installed_backend_outside_path(tmp_path: Path) -> None:
+    go_bin = tmp_path / "go" / "bin"
+    go_bin.mkdir(parents=True)
+    make_executable(go_bin / "go-mtpfs", "#!/bin/sh\nexit 0\n")
+    (tmp_path / "macfuse.fs").mkdir()
+
+    result = run_maft(
+        tmp_path,
+        "doctor",
+        path="/usr/bin:/bin:/usr/sbin:/sbin",
+        extra_env={"GOPATH": str(tmp_path / "go"), "HOME": str(tmp_path / "home")},
+    )
+
+    assert result.returncode == 0
+    assert "go-mtpfs: ok" in result.stdout
 
 
 def test_mount_invokes_go_mtpfs_and_records_metadata(tmp_path: Path) -> None:

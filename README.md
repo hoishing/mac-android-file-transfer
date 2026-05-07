@@ -9,8 +9,21 @@ It mounts Android MTP storage to a local folder, then provides explicit `cp`,
 
 - macOS
 - macFUSE
-- `go-mtpfs` available in `PATH`
+- `go-mtpfs` available in `PATH`, `GOBIN`, or `GOPATH/bin`
 - `diskutil` or `/sbin/umount` for unmounting
+
+Install the backend with:
+
+```sh
+brew install go libusb pkg-config
+go install github.com/ganeshrvel/go-mtpfs@latest
+```
+
+If your shell still cannot find it, add Go's bin directory to `PATH`:
+
+```sh
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
 
 Run:
 

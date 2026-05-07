@@ -101,8 +101,9 @@ def add_mount_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def cmd_doctor(_args: argparse.Namespace) -> int:
+    go_mtpfs = find_go_mtpfs()
     checks = [
-        ("go-mtpfs", shutil.which("go-mtpfs") is not None, install_go_mtpfs_help()),
+        ("go-mtpfs", go_mtpfs is not None, install_go_mtpfs_help()),
         ("diskutil", shutil.which("diskutil") is not None, "Provided by macOS."),
         ("/sbin/umount", Path("/sbin/umount").exists(), "Provided by macOS."),
         ("macFUSE", macfuse_available(), "Install from https://macfuse.github.io/."),
@@ -119,7 +120,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
 
 def cmd_mount(args: argparse.Namespace) -> int:
-    go_mtpfs = shutil.which("go-mtpfs")
+    go_mtpfs = find_go_mtpfs()
     if go_mtpfs is None:
         raise CliError(f"go-mtpfs not found in PATH. {install_go_mtpfs_help()}")
     if not macfuse_available():
@@ -375,10 +376,57 @@ def macfuse_available() -> bool:
     return any(path.exists() for path in paths)
 
 
+def find_go_mtpfs() -> str | None:
+    executable = shutil.which("go-mtpfs")
+    if executable is not None:
+        return executable
+
+    for path in go_binary_dirs():
+        candidate = path / "go-mtpfs"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def go_binary_dirs() -> list[Path]:
+    env_paths: list[Path] = []
+    gobin = os.environ.get("GOBIN")
+    if gobin:
+        env_paths.append(Path(gobin).expanduser())
+
+    gopath = os.environ.get("GOPATH")
+    if gopath:
+        env_paths.extend(
+            Path(path).expanduser() / "bin" for path in gopath.split(os.pathsep) if path
+        )
+    else:
+        env_paths.append(Path.home() / "go" / "bin")
+
+    go = shutil.which("go")
+    if go is not None:
+        result = subprocess.run(
+            [go, "env", "GOBIN", "GOPATH"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            lines = result.stdout.splitlines()
+            if len(lines) >= 1 and lines[0]:
+                env_paths.append(Path(lines[0]).expanduser())
+            if len(lines) >= 2 and lines[1]:
+                env_paths.extend(
+                    Path(path).expanduser() / "bin" for path in lines[1].split(os.pathsep) if path
+                )
+
+    return list(dict.fromkeys(env_paths))
+
+
 def install_go_mtpfs_help() -> str:
     return (
         "Install Go and go-mtpfs, for example: "
-        "brew install go libusb pkg-config && go install github.com/ganeshrvel/go-mtpfs@latest"
+        "brew install go libusb pkg-config && go install github.com/ganeshrvel/go-mtpfs@latest. "
+        "If go-mtpfs is already installed, add $(go env GOPATH)/bin to PATH."
     )
 
 if __name__ == "__main__":
