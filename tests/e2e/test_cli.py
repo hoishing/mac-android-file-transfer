@@ -46,7 +46,7 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.2.2\n"
+    assert result.stdout == "maft 0.2.3\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
@@ -88,7 +88,7 @@ def test_install_backend_patches_and_installs_go_mtpfs(tmp_path: Path) -> None:
         """#!/bin/sh
 last=""
 for arg in "$@"; do last="$arg"; done
-mkdir -p "$last"
+mkdir -p "$last/fs"
 cat > "$last/main.go" <<'GO'
 package main
 
@@ -106,6 +106,22 @@ func main() {
 \t_ = mountOpts
 }
 GO
+cat > "$last/fs/fs.go" <<'GO'
+package fs
+
+func (n *folderNode) basenameRename(oldName string, newName string) error {
+\tch := n.GetChild(oldName)
+
+\tmFile := ch.Operations().(mtpNode)
+
+\tif mFile.Handle() != 0 {
+\t\treturn nil
+\t}
+\treturn nil
+}
+
+var _ = (fs.NodeRenamer)((*folderNode)(nil))
+GO
 """,
     )
     make_executable(
@@ -116,6 +132,10 @@ if [ "$1" = install ]; then
   grep 'zero := time.Duration(0)' main.go >/dev/null || exit 10
   grep 'AttrTimeout:  &zero' main.go >/dev/null || exit 11
   grep 'EntryTimeout: &zero' main.go >/dev/null || exit 12
+  grep 'mFile.SetName(newName)' fs/fs.go >/dev/null || exit 13
+  grep 'n.fetched = false' fs/fs.go >/dev/null || exit 14
+  grep 'NotifyEntry(oldName)' fs/fs.go >/dev/null || exit 15
+  grep 'NotifyEntry(newName)' fs/fs.go >/dev/null || exit 16
 fi
 exit 0
 """,
@@ -130,6 +150,7 @@ exit 0
 
     assert result.returncode == 0, result.stderr
     assert "zero metadata cache TTLs" in result.stdout
+    assert "fresh rename listings" in result.stdout
     assert "get github.com/hanwen/go-fuse/v2@v2.10.1" in log.read_text(encoding="utf-8")
 
 
