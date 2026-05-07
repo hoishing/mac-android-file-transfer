@@ -15,6 +15,9 @@ from typing import TextIO, cast
 from maft import __version__
 
 APP_NAME = "maft"
+BACKEND_REPOSITORY = "https://github.com/ganeshrvel/go-mtpfs.git"
+BACKEND_VERSION = "v1.0.3"
+BACKEND_GO_FUSE_VERSION = "v2.10.1"
 DEFAULT_STATE_DIR = Path.home() / "Library" / "Application Support" / APP_NAME
 DEFAULT_MACFUSE_PATHS = (
     Path("/Library/Filesystems/macfuse.fs"),
@@ -54,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="check local dependencies")
     doctor.set_defaults(func=cmd_doctor)
+
+    install_backend = subparsers.add_parser(
+        "install-backend",
+        help="install the patched go-mtpfs backend for current macFUSE and fresh listings",
+    )
+    install_backend.set_defaults(func=cmd_install_backend)
 
     mount = subparsers.add_parser("mount", help="mount an Android device")
     mount.add_argument("mountpoint")
@@ -126,6 +135,43 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_install_backend(_args: argparse.Namespace) -> int:
+    go = shutil.which("go")
+    if go is None:
+        raise CliError("go not found in PATH. Install it with: brew install go")
+    git = shutil.which("git")
+    if git is None:
+        raise CliError("git not found in PATH.")
+
+    with tempfile.TemporaryDirectory(prefix="maft-go-mtpfs-") as directory:
+        checkout = Path(directory) / "go-mtpfs"
+        run_checked(
+            [
+                git,
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                BACKEND_VERSION,
+                BACKEND_REPOSITORY,
+                str(checkout),
+            ]
+        )
+        run_checked(
+            [go, "get", f"github.com/hanwen/go-fuse/v2@{BACKEND_GO_FUSE_VERSION}"],
+            cwd=checkout,
+        )
+        patch_backend_cache_timeouts(checkout / "main.go")
+        run_checked([go, "mod", "tidy"], cwd=checkout)
+        run_checked([go, "install", "."], cwd=checkout)
+
+    print(
+        "installed go-mtpfs backend "
+        f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION} and zero metadata cache TTLs"
+    )
+    return 0
+
+
 def cmd_mount(args: argparse.Namespace) -> int:
     go_mtpfs = find_go_mtpfs()
     if go_mtpfs is None:
@@ -193,6 +239,35 @@ def ensure_backend_started(
         if details:
             message = f"{message}: {details}"
     raise CliError(message)
+
+
+def patch_backend_cache_timeouts(path: Path) -> None:
+    source = path.read_text(encoding="utf-8")
+    replacements = {
+        "sec := time.Second\n\tmountOpts :=": "zero := time.Duration(0)\n\tmountOpts :=",
+        "AttrTimeout:  &sec,": "AttrTimeout:  &zero,",
+        "EntryTimeout: &sec,": "EntryTimeout: &zero,",
+    }
+    for old, new in replacements.items():
+        if old not in source:
+            raise CliError(f"could not patch go-mtpfs cache timeout source: missing {old!r}")
+        source = source.replace(old, new, 1)
+    path.write_text(source, encoding="utf-8")
+
+
+def run_checked(command: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+    output = result.stderr.strip() or result.stdout.strip()
+    detail = f": {output}" if output else ""
+    raise CliError(f"{Path(command[0]).name} failed{detail}")
 
 
 def cmd_unmount(args: argparse.Namespace) -> int:

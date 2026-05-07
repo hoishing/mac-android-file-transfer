@@ -46,7 +46,7 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.1.2\n"
+    assert result.stdout == "maft 0.1.3\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
@@ -77,6 +77,60 @@ def test_doctor_finds_go_installed_backend_outside_path(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "go-mtpfs: ok" in result.stdout
+
+
+def test_install_backend_patches_and_installs_go_mtpfs(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "backend-install.log"
+    make_executable(
+        bin_dir / "git",
+        """#!/bin/sh
+last=""
+for arg in "$@"; do last="$arg"; done
+mkdir -p "$last"
+cat > "$last/main.go" <<'GO'
+package main
+
+import "time"
+
+func main() {
+\tsec := time.Second
+\tmountOpts := struct {
+\t\tAttrTimeout  *time.Duration
+\t\tEntryTimeout *time.Duration
+\t}{
+\t\tAttrTimeout:  &sec,
+\t\tEntryTimeout: &sec,
+\t}
+\t_ = mountOpts
+}
+GO
+""",
+    )
+    make_executable(
+        bin_dir / "go",
+        f"""#!/bin/sh
+printf '%s\\n' "$*" >> {log}
+if [ "$1" = install ]; then
+  grep 'zero := time.Duration(0)' main.go >/dev/null || exit 10
+  grep 'AttrTimeout:  &zero' main.go >/dev/null || exit 11
+  grep 'EntryTimeout: &zero' main.go >/dev/null || exit 12
+fi
+exit 0
+""",
+    )
+
+    result = run_maft(
+        tmp_path,
+        "install-backend",
+        path=f"{bin_dir}:/usr/bin:/bin",
+        extra_env={"HOME": str(tmp_path / "home")},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "zero metadata cache TTLs" in result.stdout
+    assert "get github.com/hanwen/go-fuse/v2@v2.10.1" in log.read_text(encoding="utf-8")
 
 
 def test_mount_invokes_go_mtpfs_and_records_metadata(tmp_path: Path) -> None:
