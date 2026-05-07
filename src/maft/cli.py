@@ -221,7 +221,7 @@ def default_completion_dir(shell: str) -> Path:
     if shell == "bash":
         return Path.home() / ".local" / "share" / "bash-completion" / "completions"
     if shell == "zsh":
-        return Path("/usr/local/share/zsh/site-functions")
+        return Path("/opt/homebrew/share/zsh/site-functions")
     raise CliError(f"unsupported shell: {shell}")
 
 

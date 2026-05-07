@@ -46,7 +46,7 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.2.1\n"
+    assert result.stdout == "maft 0.2.2\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
@@ -181,7 +181,7 @@ def test_zsh_completion_default_directory_uses_site_functions(tmp_path: Path) ->
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "/usr/local/share/zsh/site-functions\n"
+    assert result.stdout == "/opt/homebrew/share/zsh/site-functions\n"
 
 
 def test_completion_install_refuses_existing_file_without_force(tmp_path: Path) -> None:

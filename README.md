@@ -53,12 +53,12 @@ Install zsh completion:
 maft completion install zsh
 ```
 
-This writes `_maft` to `/usr/local/share/zsh/site-functions/_maft`. If that
+This writes `_maft` to `/opt/homebrew/share/zsh/site-functions/_maft`. If that
 directory is not already in your zsh completion path, add this before `compinit`
 in `~/.zshrc`:
 
 ```sh
-fpath=(/usr/local/share/zsh/site-functions $fpath)
+fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
 autoload -Uz compinit
 compinit
 ```
