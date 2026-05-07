@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -45,7 +46,7 @@ def test_version_flag_prints_current_version(tmp_path: Path) -> None:
     result = run_maft(tmp_path, "--version")
 
     assert result.returncode == 0
-    assert result.stdout == "maft 0.1.1\n"
+    assert result.stdout == "maft 0.1.2\n"
 
 
 def test_doctor_reports_missing_backend(tmp_path: Path) -> None:
@@ -84,7 +85,7 @@ def test_mount_invokes_go_mtpfs_and_records_metadata(tmp_path: Path) -> None:
     log = tmp_path / "go-mtpfs.log"
     make_executable(
         bin_dir / "go-mtpfs",
-        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nexit 0\n",
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nwhile true; do sleep 1; done\n",
     )
     (tmp_path / "macfuse.fs").mkdir()
     mountpoint = tmp_path / "Android"
@@ -110,6 +111,28 @@ def test_mount_invokes_go_mtpfs_and_records_metadata(tmp_path: Path) -> None:
     assert "-dev\n1\n-storage\n2\n-allow-other\n-usb-timeout\n10" in invocation
     state = json.loads((tmp_path / "state" / "mounts.json").read_text(encoding="utf-8"))
     assert str(mountpoint.resolve()) in state
+    os.kill(state[str(mountpoint.resolve())]["pid"], signal.SIGTERM)
+
+
+def test_mount_reports_backend_startup_failure(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    make_executable(
+        bin_dir / "go-mtpfs",
+        "#!/bin/sh\nprintf 'backend failed\\n' >&2\nexit 1\n",
+    )
+    (tmp_path / "macfuse.fs").mkdir()
+
+    result = run_maft(
+        tmp_path,
+        "mount",
+        str(tmp_path / "Android"),
+        path=f"{bin_dir}:/usr/bin:/bin",
+    )
+
+    assert result.returncode == 1
+    assert "go-mtpfs exited before mounting with status 1: backend failed" in result.stderr
+    assert not (tmp_path / "state" / "mounts.json").exists()
 
 
 def test_unmount_uses_available_command_and_cleans_metadata(tmp_path: Path) -> None:

@@ -6,10 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 from maft import __version__
 
@@ -61,7 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
     mount.add_argument("--android", dest="android", action="store_true", default=True)
     mount.add_argument("--no-android", dest="android", action="store_false")
     mount.add_argument("--allow-other", action="store_true")
-    mount.add_argument("--debug", action="store_true")
+    mount.add_argument(
+        "--debug",
+        nargs="?",
+        const="usb,mtp,fuse",
+        metavar="OPTIONS",
+        help="enable go-mtpfs debug output, optionally comma-separated: usb,data,mtp,fuse",
+    )
     mount.add_argument("--usb-timeout", type=int, help="go-mtpfs USB timeout")
     mount.set_defaults(func=cmd_mount)
 
@@ -141,14 +148,23 @@ def cmd_mount(args: argparse.Namespace) -> int:
     if args.allow_other:
         command.append("-allow-other")
     if args.debug:
-        command.append("-debug")
+        command.extend(["-debug", args.debug])
     if args.usb_timeout is not None:
         command.extend(["-usb-timeout", str(args.usb_timeout)])
     command.append(str(mountpoint))
 
-    stdout = None if args.debug else subprocess.DEVNULL
-    stderr = None if args.debug else subprocess.DEVNULL
-    process = subprocess.Popen(command, stdout=stdout, stderr=stderr, start_new_session=True)
+    if args.debug:
+        process = subprocess.Popen(command, start_new_session=True)
+        ensure_backend_started(process)
+    else:
+        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
+            process = subprocess.Popen(
+                command,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            ensure_backend_started(process, output)
     write_mount_record(
         MountRecord(
             mountpoint=str(mountpoint),
@@ -159,6 +175,24 @@ def cmd_mount(args: argparse.Namespace) -> int:
     )
     print(f"mounted {mountpoint} with go-mtpfs pid {process.pid}")
     return 0
+
+
+def ensure_backend_started(
+    process: subprocess.Popen[bytes],
+    output: TextIO | None = None,
+) -> None:
+    try:
+        returncode = process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        return
+
+    message = f"go-mtpfs exited before mounting with status {returncode}"
+    if output is not None:
+        output.seek(0)
+        details = output.read().strip()
+        if details:
+            message = f"{message}: {details}"
+    raise CliError(message)
 
 
 def cmd_unmount(args: argparse.Namespace) -> int:
