@@ -23,6 +23,16 @@ DEFAULT_MACFUSE_PATHS = (
     Path("/Library/Filesystems/macfuse.fs"),
     Path("/Library/Filesystems/osxfuse.fs"),
 )
+TOP_LEVEL_COMMANDS = (
+    "doctor",
+    "install-backend",
+    "mount",
+    "unmount",
+    "cp",
+    "mv",
+    "rm",
+    "completion",
+)
 
 
 @dataclass(frozen=True)
@@ -104,6 +114,25 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("paths", nargs="+")
     rm.set_defaults(func=cmd_rm)
 
+    completion = subparsers.add_parser("completion", help="install shell completion")
+    completion_subparsers = completion.add_subparsers(dest="completion_command", required=True)
+    completion_install = completion_subparsers.add_parser(
+        "install",
+        help="install bash or zsh completion for maft",
+    )
+    completion_install.add_argument("shell", choices=("bash", "zsh"))
+    completion_install.add_argument(
+        "--dir",
+        type=Path,
+        help="completion install directory",
+    )
+    completion_install.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing completion file",
+    )
+    completion_install.set_defaults(func=cmd_completion_install)
+
     return parser
 
 
@@ -170,6 +199,214 @@ def cmd_install_backend(_args: argparse.Namespace) -> int:
         f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION} and zero metadata cache TTLs"
     )
     return 0
+
+
+def cmd_completion_install(args: argparse.Namespace) -> int:
+    shell = str(args.shell)
+    directory = (
+        expand_path(str(args.dir)) if args.dir is not None else default_completion_dir(shell)
+    )
+    target = directory / completion_filename(shell)
+    if target.exists() and not args.force:
+        raise CliError(f"completion file already exists: {target}. Pass --force to overwrite it.")
+
+    directory.mkdir(parents=True, exist_ok=True)
+    target.write_text(completion_script(shell), encoding="utf-8")
+    print(f"installed {shell} completion to {target}")
+    print(completion_activation_help(shell, directory))
+    return 0
+
+
+def default_completion_dir(shell: str) -> Path:
+    if shell == "bash":
+        return Path.home() / ".local" / "share" / "bash-completion" / "completions"
+    if shell == "zsh":
+        zdotdir = os.environ.get("ZDOTDIR")
+        return Path(zdotdir).expanduser() / ".zfunc" if zdotdir else Path.home() / ".zfunc"
+    raise CliError(f"unsupported shell: {shell}")
+
+
+def completion_filename(shell: str) -> str:
+    if shell == "bash":
+        return "maft"
+    if shell == "zsh":
+        return "_maft"
+    raise CliError(f"unsupported shell: {shell}")
+
+
+def completion_script(shell: str) -> str:
+    if shell == "bash":
+        return bash_completion_script()
+    if shell == "zsh":
+        return zsh_completion_script()
+    raise CliError(f"unsupported shell: {shell}")
+
+
+def bash_completion_script() -> str:
+    commands = " ".join(TOP_LEVEL_COMMANDS)
+    mount_options = " ".join(
+        (
+            "--dev",
+            "--storage",
+            "--android",
+            "--no-android",
+            "--allow-other",
+            "--debug",
+            "--usb-timeout",
+            "--help",
+        )
+    )
+    return f"""# bash completion for maft
+_maft_completion() {{
+    local cur prev command
+    COMPREPLY=()
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    command=""
+
+    local word
+    for word in "${{COMP_WORDS[@]:1}}"; do
+        case "$word" in
+            doctor|install-backend|mount|unmount|cp|mv|rm|completion)
+                command="$word"
+                break
+                ;;
+        esac
+    done
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "{commands}" -- "$cur") )
+        return 0
+    fi
+
+    case "$prev" in
+        --dev|--storage|--debug|--usb-timeout|--mount|--dir)
+            return 0
+            ;;
+    esac
+
+    case "$command" in
+        mount)
+            COMPREPLY=( $(compgen -W "{mount_options}" -- "$cur") )
+            ;;
+        unmount)
+            COMPREPLY=( $(compgen -W "--help" -- "$cur") )
+            ;;
+        cp)
+            COMPREPLY=( $(compgen -W "--mount --recursive -r --help" -- "$cur") )
+            ;;
+        mv)
+            COMPREPLY=( $(compgen -W "--mount --help" -- "$cur") )
+            ;;
+        rm)
+            COMPREPLY=( $(compgen -W "--mount --recursive -r --help" -- "$cur") )
+            ;;
+        completion)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "install" -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -W "bash zsh --dir --force --help" -- "$cur") )
+            fi
+            ;;
+        *)
+            COMPREPLY=( $(compgen -W "--help" -- "$cur") )
+            ;;
+    esac
+}}
+
+complete -o default -F _maft_completion maft
+"""
+
+
+def zsh_completion_script() -> str:
+    return """#compdef maft
+# zsh completion for maft
+
+local -a commands
+commands=(
+  'doctor:check local dependencies'
+  'install-backend:install the patched go-mtpfs backend'
+  'mount:mount an Android device'
+  'unmount:unmount an Android mount folder'
+  'cp:copy files to, from, or within a mounted device'
+  'mv:move files to, from, or within a mounted device'
+  'rm:remove files from a mounted device'
+  'completion:install shell completion'
+)
+
+_arguments -C \
+  '(-h --help)'{-h,--help}'[show help]' \
+  '--version[show version]' \
+  '1:command:->command' \
+  '*::arg:->args'
+
+case $state in
+  command)
+    _describe -t commands 'maft command' commands
+    ;;
+  args)
+    case $words[2] in
+      mount)
+        _arguments \
+          '--dev[go-mtpfs device selector]:device:' \
+          '--storage[go-mtpfs storage selector]:storage:' \
+          '--android[enable Android mode]' \
+          '--no-android[disable Android mode]' \
+          '--allow-other[allow other users to access the mount]' \
+          '--debug[enable go-mtpfs debug output]::debug options:' \
+          '--usb-timeout[go-mtpfs USB timeout]:seconds:' \
+          '(-h --help)'{-h,--help}'[show help]' \
+          '*:mountpoint:_files'
+        ;;
+      unmount)
+        _arguments '(-h --help)'{-h,--help}'[show help]' '*:mountpoint:_files -/'
+        ;;
+      cp)
+        _arguments \
+          '--mount[mounted Android folder]:mountpoint:_files -/' \
+          '(-r --recursive)'{-r,--recursive}'[copy directories recursively]' \
+          '(-h --help)'{-h,--help}'[show help]' \
+          '*:path:_files'
+        ;;
+      mv)
+        _arguments \
+          '--mount[mounted Android folder]:mountpoint:_files -/' \
+          '(-h --help)'{-h,--help}'[show help]' \
+          '*:path:_files'
+        ;;
+      rm)
+        _arguments \
+          '--mount[mounted Android folder]:mountpoint:_files -/' \
+          '(-r --recursive)'{-r,--recursive}'[remove directories recursively]' \
+          '(-h --help)'{-h,--help}'[show help]' \
+          '*:path:_files'
+        ;;
+      completion)
+        _arguments \
+          '1:completion command:(install)' \
+          '2:shell:(bash zsh)' \
+          '--dir[completion install directory]:directory:_files -/' \
+          '--force[overwrite an existing completion file]' \
+          '(-h --help)'{-h,--help}'[show help]'
+        ;;
+    esac
+    ;;
+esac
+"""
+
+
+def completion_activation_help(shell: str, directory: Path) -> str:
+    if shell == "bash":
+        return (
+            "If bash-completion does not load this directory automatically, source the installed "
+            f"file from ~/.bashrc: source {directory / 'maft'}"
+        )
+    if shell == "zsh":
+        return (
+            "Add this before compinit in ~/.zshrc if needed: "
+            f"fpath=({directory} $fpath); autoload -Uz compinit; compinit"
+        )
+    raise CliError(f"unsupported shell: {shell}")
 
 
 def cmd_mount(args: argparse.Namespace) -> int:

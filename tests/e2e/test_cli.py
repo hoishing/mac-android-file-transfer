@@ -133,6 +133,70 @@ exit 0
     assert "get github.com/hanwen/go-fuse/v2@v2.10.1" in log.read_text(encoding="utf-8")
 
 
+def test_completion_install_writes_bash_completion(tmp_path: Path) -> None:
+    completion_dir = tmp_path / "completions"
+
+    result = run_maft(tmp_path, "completion", "install", "bash", "--dir", str(completion_dir))
+
+    assert result.returncode == 0, result.stderr
+    target = completion_dir / "maft"
+    content = target.read_text(encoding="utf-8")
+    assert "complete -o default -F _maft_completion maft" in content
+    assert "doctor install-backend mount unmount cp mv rm completion" in content
+    assert "--mount --recursive -r --help" in content
+    assert f"installed bash completion to {target}" in result.stdout
+
+
+def test_completion_install_writes_zsh_completion(tmp_path: Path) -> None:
+    completion_dir = tmp_path / "zfunc"
+
+    result = run_maft(tmp_path, "completion", "install", "zsh", "--dir", str(completion_dir))
+
+    assert result.returncode == 0, result.stderr
+    target = completion_dir / "_maft"
+    content = target.read_text(encoding="utf-8")
+    assert "#compdef maft" in content
+    assert "'install-backend:install the patched go-mtpfs backend'" in content
+    assert "'--mount[mounted Android folder]:mountpoint:_files -/'" in content
+    assert "'--force[overwrite an existing completion file]'" in content
+    assert f"installed zsh completion to {target}" in result.stdout
+
+
+def test_completion_install_refuses_existing_file_without_force(tmp_path: Path) -> None:
+    completion_dir = tmp_path / "completions"
+    completion_dir.mkdir()
+    target = completion_dir / "maft"
+    target.write_text("existing\n", encoding="utf-8")
+
+    result = run_maft(tmp_path, "completion", "install", "bash", "--dir", str(completion_dir))
+
+    assert result.returncode == 1
+    assert "completion file already exists" in result.stderr
+    assert "Pass --force to overwrite it" in result.stderr
+    assert target.read_text(encoding="utf-8") == "existing\n"
+
+
+def test_completion_install_force_overwrites_existing_file(tmp_path: Path) -> None:
+    completion_dir = tmp_path / "completions"
+    completion_dir.mkdir()
+    target = completion_dir / "maft"
+    target.write_text("existing\n", encoding="utf-8")
+
+    result = run_maft(
+        tmp_path,
+        "completion",
+        "install",
+        "bash",
+        "--dir",
+        str(completion_dir),
+        "--force",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "complete -o default -F _maft_completion maft" in target.read_text(encoding="utf-8")
+    assert "existing" not in target.read_text(encoding="utf-8")
+
+
 def test_mount_invokes_go_mtpfs_and_records_metadata(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

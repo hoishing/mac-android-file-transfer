@@ -31,6 +31,40 @@ Run:
 maft doctor
 ```
 
+## Shell completion
+
+Install bash completion:
+
+```sh
+maft completion install bash
+```
+
+This writes `maft` to `~/.local/share/bash-completion/completions/maft`. If your
+bash setup does not load that directory automatically, source the installed file
+from `~/.bashrc`:
+
+```sh
+source ~/.local/share/bash-completion/completions/maft
+```
+
+Install zsh completion:
+
+```sh
+maft completion install zsh
+```
+
+This writes `_maft` to `${ZDOTDIR:-~}/.zfunc/_maft`. If `.zfunc` is not already
+in your zsh completion path, add this before `compinit` in `~/.zshrc`:
+
+```sh
+fpath=(${ZDOTDIR:-~}/.zfunc $fpath)
+autoload -Uz compinit
+compinit
+```
+
+Use `--dir` to install into a custom completion directory and `--force` to
+overwrite an existing completion file.
+
 ## Usage
 
 ```sh
