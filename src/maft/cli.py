@@ -190,13 +190,14 @@ def cmd_install_backend(_args: argparse.Namespace) -> int:
             [go, "get", f"github.com/hanwen/go-fuse/v2@{BACKEND_GO_FUSE_VERSION}"],
             cwd=checkout,
         )
-        patch_backend_cache_timeouts(checkout / "main.go")
+        patch_backend_sources(checkout)
         run_checked([go, "mod", "tidy"], cwd=checkout)
         run_checked([go, "install", "."], cwd=checkout)
 
     print(
         "installed go-mtpfs backend "
-        f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION} and zero metadata cache TTLs"
+        f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION}, "
+        "zero metadata cache TTLs, disabled vnode name cache, and refreshed rename listings"
     )
     return 0
 
@@ -477,13 +478,37 @@ def ensure_backend_started(
     raise CliError(message)
 
 
-def patch_backend_cache_timeouts(path: Path) -> None:
+def patch_backend_sources(checkout: Path) -> None:
+    patch_backend_mount_options(checkout / "main.go")
+    patch_backend_rename_refresh(checkout / "fs" / "fs.go")
+
+
+def patch_backend_mount_options(path: Path) -> None:
     source = replace_backend_source(
         path,
         {
             "sec := time.Second\n\tmountOpts :=": "zero := time.Duration(0)\n\tmountOpts :=",
+            "Debug:          debugs[\"fuse\"] || debugs[\"fs\"],": (
+                "Debug:          debugs[\"fuse\"] || debugs[\"fs\"],\n"
+                "\t\t\tOptions:        []string{\"novncache\"},"
+            ),
             "AttrTimeout:  &sec,": "AttrTimeout:  &zero,",
             "EntryTimeout: &sec,": "EntryTimeout: &zero,",
+        },
+    )
+    path.write_text(source, encoding="utf-8")
+
+
+def patch_backend_rename_refresh(path: Path) -> None:
+    source = replace_backend_source(
+        path,
+        {
+            "\treturn nil\n}\n\nvar _ = (fs.NodeRenamer)": (
+                "\tmFile.SetName(newName)\n"
+                "\tn.fetched = false\n"
+                "\treturn nil\n"
+                "}\n\nvar _ = (fs.NodeRenamer)"
+            ),
         },
     )
     path.write_text(source, encoding="utf-8")
