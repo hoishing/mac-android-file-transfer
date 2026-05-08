@@ -20,9 +20,9 @@ maft install-backend
 ```
 
 `maft install-backend` builds the supported `go-mtpfs` backend with macFUSE
-compatibility updates, zero metadata cache TTLs, and fresher directory listings
-after renames. If a device is already mounted, unmount it and mount it again so
-the running backend process uses the newly installed binary.
+compatibility updates and zero metadata cache TTLs. If a device is already
+mounted, unmount it and mount it again so the running backend process uses the
+newly installed binary.
 
 If your shell still cannot find it, add Go's bin directory to `PATH`:
 

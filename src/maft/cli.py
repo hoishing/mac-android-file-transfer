@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     install_backend = subparsers.add_parser(
         "install-backend",
-        help="install the patched go-mtpfs backend for current macFUSE and fresh listings",
+        help="install the patched go-mtpfs backend for current macFUSE",
     )
     install_backend.set_defaults(func=cmd_install_backend)
 
@@ -190,14 +190,13 @@ def cmd_install_backend(_args: argparse.Namespace) -> int:
             [go, "get", f"github.com/hanwen/go-fuse/v2@{BACKEND_GO_FUSE_VERSION}"],
             cwd=checkout,
         )
-        patch_backend_sources(checkout)
+        patch_backend_cache_timeouts(checkout / "main.go")
         run_checked([go, "mod", "tidy"], cwd=checkout)
         run_checked([go, "install", "."], cwd=checkout)
 
     print(
         "installed go-mtpfs backend "
-        f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION}, "
-        "zero metadata cache TTLs, and fresh rename listings"
+        f"{BACKEND_VERSION} with go-fuse {BACKEND_GO_FUSE_VERSION} and zero metadata cache TTLs"
     )
     return 0
 
@@ -478,11 +477,6 @@ def ensure_backend_started(
     raise CliError(message)
 
 
-def patch_backend_sources(checkout: Path) -> None:
-    patch_backend_cache_timeouts(checkout / "main.go")
-    patch_backend_rename_refresh(checkout / "fs" / "fs.go")
-
-
 def patch_backend_cache_timeouts(path: Path) -> None:
     source = replace_backend_source(
         path,
@@ -490,23 +484,6 @@ def patch_backend_cache_timeouts(path: Path) -> None:
             "sec := time.Second\n\tmountOpts :=": "zero := time.Duration(0)\n\tmountOpts :=",
             "AttrTimeout:  &sec,": "AttrTimeout:  &zero,",
             "EntryTimeout: &sec,": "EntryTimeout: &zero,",
-        },
-    )
-    path.write_text(source, encoding="utf-8")
-
-
-def patch_backend_rename_refresh(path: Path) -> None:
-    source = replace_backend_source(
-        path,
-        {
-            "\treturn nil\n}\n\nvar _ = (fs.NodeRenamer)": (
-                "\tmFile.SetName(newName)\n"
-                "\tn.fetched = false\n"
-                "\t_ = n.NotifyEntry(oldName)\n"
-                "\t_ = n.NotifyEntry(newName)\n"
-                "\treturn nil\n"
-                "}\n\nvar _ = (fs.NodeRenamer)"
-            ),
         },
     )
     path.write_text(source, encoding="utf-8")
